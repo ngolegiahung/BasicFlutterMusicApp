@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:rxdart/rxdart.dart';
 
@@ -10,13 +11,17 @@ class DurationState {
 }
 
 class AudioPlayerManager {
-  AudioPlayerManager({required this.songUrl});
+  AudioPlayerManager._internal();
+
+  static final AudioPlayerManager _instance = AudioPlayerManager._internal();
+
+  factory AudioPlayerManager() => _instance;
 
   final player = AudioPlayer();
   Stream<DurationState>? durationState;
-  String songUrl;
+  String songUrl = '';
 
-  void init() {
+  void prepare({bool isNewSong = false}) {
     durationState = Rx.combineLatest2<Duration, PlaybackEvent, DurationState>(
         player.positionStream,
         player.playbackEventStream,
@@ -27,7 +32,11 @@ class AudioPlayerManager {
                 total: playBackEvent.duration
             )
     );
-    player.setUrl(songUrl);
+
+    if (isNewSong) {
+      player.setUrl(songUrl);
+      player.play();
+    }
   }
 
   void dispose() {
@@ -36,6 +45,6 @@ class AudioPlayerManager {
 
   void updateSong(String songUrl) {
     this.songUrl = songUrl;
-    init();
+    prepare();
   }
 }

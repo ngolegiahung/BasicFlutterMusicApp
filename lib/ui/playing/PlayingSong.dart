@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:audio_video_progress_bar/audio_video_progress_bar.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -36,6 +38,8 @@ class _NowPlayingPageState extends State<NowPlayingPage> with SingleTickerProvid
   late Song _currentSong;
 
   late double _currentAnimationPosition;
+  bool _isShuffle = false;
+  late LoopMode _loopMode = LoopMode.off;
 
   @override
   void initState() {
@@ -43,8 +47,15 @@ class _NowPlayingPageState extends State<NowPlayingPage> with SingleTickerProvid
 
     _currentSong = widget.playingSong;
     _imageAnimController = AnimationController(vsync: this, duration: const Duration(milliseconds: 12000));
-    _audioPlayerManager = AudioPlayerManager(songUrl: _currentSong.source);
-    _audioPlayerManager.init();
+    _audioPlayerManager = AudioPlayerManager();
+
+    if(_audioPlayerManager.songUrl.compareTo(_currentSong.source) != 0) {
+      _audioPlayerManager.updateSong(_currentSong.source);
+      _audioPlayerManager.prepare(isNewSong: true);
+    } else {
+      _audioPlayerManager.prepare(isNewSong: false);
+    }
+
     _currentSongIndex = widget.songs.indexOf(widget.playingSong);
     _currentAnimationPosition = 0.0;
   }
@@ -141,7 +152,6 @@ class _NowPlayingPageState extends State<NowPlayingPage> with SingleTickerProvid
 
   @override
   void dispose() {
-    _audioPlayerManager.dispose();
     _imageAnimController.dispose();
     super.dispose();
   }
@@ -183,6 +193,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> with SingleTickerProvid
           switch (processingState) {
             case ProcessingState.loading:
             case ProcessingState.buffering:
+              _pauseRotationAnimation();
               return Container(
                 margin: EdgeInsets.all(8),
                 width: 48,
@@ -190,15 +201,13 @@ class _NowPlayingPageState extends State<NowPlayingPage> with SingleTickerProvid
                 child: CircularProgressIndicator(),
               );
             case ProcessingState.completed:
-              _currentAnimationPosition = 0.0;
-              _imageAnimController.stop();
+              _stopRotationAnimation();
+              _resetRotationAnimation();
 
               return MediaButtonControl(
                 function: () {
-                  _currentAnimationPosition = 0.0;
-                  _imageAnimController.forward(from: _currentAnimationPosition);
-                  _imageAnimController.repeat();
                   _audioPlayerManager.player.seek(Duration.zero);
+                  _resetRotationAnimation();
                 },
                 icon: Icons.replay,
                 color: null,
@@ -207,21 +216,17 @@ class _NowPlayingPageState extends State<NowPlayingPage> with SingleTickerProvid
             default:
               if (playing != true) {
                 return MediaButtonControl(
-                  function: () {
-                    _audioPlayerManager.player.play();
-                    _imageAnimController.forward(from: _currentAnimationPosition);
-                    _imageAnimController.repeat();
-                  },
+                  function: _audioPlayerManager.player.play,
                   icon: Icons.play_arrow,
                   color: null,
                   size: 48,
                 );
               } else {
+                _playRotationAnimation();
                 return MediaButtonControl(
                   function: () {
                     _audioPlayerManager.player.pause();
-                    _imageAnimController.stop();
-                    _currentAnimationPosition = _imageAnimController.value;
+                    _pauseRotationAnimation();
                   },
                   icon: Icons.pause,
                   color: null,
@@ -233,28 +238,105 @@ class _NowPlayingPageState extends State<NowPlayingPage> with SingleTickerProvid
   }
 
   void _setNextSong() {
-    if (_currentSongIndex < widget.songs.length - 1) {
+    if(_isShuffle) {
+      _currentSongIndex = Random().nextInt(widget.songs.length);
+    } else if(_currentSongIndex < widget.songs.length -1) {
       _currentSongIndex++;
-    } else {
+    } else if(_loopMode == LoopMode.all && _currentSongIndex == widget.songs.length -1) {
       _currentSongIndex = 0;
     }
+
+    if (_currentSongIndex >= widget.songs.length) {
+      _currentSongIndex = _currentSongIndex % widget.songs.length;
+    }
+
     final nextSong = widget.songs[_currentSongIndex];
     _audioPlayerManager.updateSong(nextSong.source);
     setState(() {
       _currentSong = nextSong;
     });
+
+    _resetRotationAnimation();
   }
 
   void _setPreviousSong() {
-    if (_currentSongIndex > 0) {
+    if(_isShuffle) {
+      _currentSongIndex = Random().nextInt(widget.songs.length);
+    } else if(_currentSongIndex > 0) {
       _currentSongIndex--;
-    } else {
+    } else if(_loopMode == LoopMode.all && _currentSongIndex == 0) {
       _currentSongIndex = widget.songs.length - 1;
     }
+
+    if (_currentSongIndex < 0) {
+      _currentSongIndex = (_currentSongIndex % widget.songs.length).abs();
+    }
+
     final nextSong = widget.songs[_currentSongIndex];
     _audioPlayerManager.updateSong(nextSong.source);
     setState(() {
       _currentSong = nextSong;
+    });
+
+    _resetRotationAnimation();
+  }
+
+  void _playRotationAnimation() {
+    _imageAnimController.forward(from: _currentAnimationPosition);
+    _imageAnimController.repeat();
+  }
+
+  void _pauseRotationAnimation() {
+    _currentAnimationPosition = _imageAnimController.value;
+    _stopRotationAnimation();
+  }
+
+  void _stopRotationAnimation() {
+    _imageAnimController.stop();
+  }
+
+  void _resetRotationAnimation() {
+    _currentAnimationPosition = 0.0;
+    _imageAnimController.value = _currentAnimationPosition;
+  }
+
+  void _setShuffle() {
+    setState(() {
+      _isShuffle = !_isShuffle;
+    });
+  }
+
+  Color? _getShuffleColor() {
+    return _isShuffle ? Theme.of(context).colorScheme.primary : Colors.grey;
+  }
+
+  IconData _repeatingIcon() {
+    return switch(_loopMode) {
+      LoopMode.off => Icons.repeat,
+      LoopMode.one => Icons.repeat_one,
+      LoopMode.all => Icons.repeat_on,
+    };
+  }
+
+  Color? _getRepeatingIconColor() {
+    return _loopMode != LoopMode.off ? Theme.of(context).colorScheme.primary : Colors.grey;
+  }
+
+  void _setRepeatOption() {
+    switch(_loopMode) {
+      case LoopMode.off:
+        _loopMode = LoopMode.one;
+        break;
+      case LoopMode.one:
+        _loopMode = LoopMode.all;
+        break;
+      case LoopMode.all:
+        _loopMode = LoopMode.off;
+        break;
+    }
+
+    setState(() {
+      _audioPlayerManager.player.setLoopMode(_loopMode);
     });
   }
 
@@ -263,18 +345,11 @@ class _NowPlayingPageState extends State<NowPlayingPage> with SingleTickerProvid
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          MediaButtonControl(
-              function: null, icon: Icons.shuffle, color: Theme.of(context).colorScheme.primary, size: 24),
-          MediaButtonControl(
-              function: _setPreviousSong,
-              icon: Icons.skip_previous,
-              color: Theme.of(context).colorScheme.primary,
-              size: 36),
+          MediaButtonControl(function: _setShuffle, icon: Icons.shuffle, color: _getShuffleColor(), size: 24),
+          MediaButtonControl(function: _setPreviousSong, icon: Icons.skip_previous, color: Theme.of(context).colorScheme.primary, size: 36),
           _playButton(),
-          MediaButtonControl(
-              function: _setNextSong, icon: Icons.skip_next, color: Theme.of(context).colorScheme.primary, size: 36),
-          MediaButtonControl(
-              function: null, icon: Icons.repeat, color: Theme.of(context).colorScheme.primary, size: 24),
+          MediaButtonControl(function: _setNextSong, icon: Icons.skip_next, color: Theme.of(context).colorScheme.primary, size: 36),
+          MediaButtonControl(function: _setRepeatOption, icon: _repeatingIcon(), color: _getRepeatingIconColor(), size: 24),
         ],
       ),
     );
